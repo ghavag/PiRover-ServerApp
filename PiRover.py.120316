@@ -1,0 +1,148 @@
+#!/usr/bin/python
+
+# Dienstprogramm fuer den PiRover zur Ausfuehrung auf der Raspberry Pi.
+#
+# Autor: Alexander Graeb <mail@hpvag.de>
+#
+# Bugs:
+#  * Alle Client-Verbindungen muessen erste geschlossen werden, damit das Programm vollstaendig terminiert.
+
+### Konfigurationskonstanten. ###
+
+LISTEN_ADDRESS = ""
+LISTEN_PORT = 1987
+
+# Zeichenfolge, welche zur Authentifizierung des Clients dient.
+SECRET = "uMieY6ophu[a"
+
+### Programm startet hier.
+import SocketServer
+import time
+import md5
+import signal
+import thread
+import sys
+import socket
+
+l_speed = 0 # Stellvertretend fuer die horizintale Bewegungsrichtung.
+r_speed = 0 # Stellvertretend fuer die vertikale Bewegungsrichtung.
+running = True # Indiziert, ob der Haupt-Thread noch laeuft.
+
+class ClientHandler(SocketServer.BaseRequestHandler):
+	cc = 0
+
+	def handle(self):
+		print "Client connected from %s." % (self.client_address[0])
+
+		client_authed = False
+
+		while True:
+			# Warte darauf, dass Client das Zauberwort sagt.
+			data = self.request.recv(1024)
+
+			if not data:
+				break
+
+			print "Received data from client: %s" % (data)
+
+			# Begruesse Client und sende Salz fuer den Authentifizierungs-Hash mit.
+			authsalt = str(time.time())
+
+			if (data == 'Hello PiRover!\n'):
+				self.request.send("PiRover 1.0 here! %s\n" % (authsalt))
+			else:
+				break
+
+			if (ClientHandler.cc != 0):
+				self.request.send("Client already connected!\n")
+				break
+
+			# Warte darauf, dass sich Client authentifiziert.
+			data = self.request.recv(1024)
+
+			if not data:
+				break
+
+			print "Received data from client: %s" % (data)
+
+			if (data == (md5.new(SECRET + authsalt).hexdigest() + "\n")):
+				print "Client auth ok!"
+				self.request.send("OK\n");
+				ClientHandler.cc += 1 # Erst nachdem sich client erfolgreich authentifiziert hat, wird er gezaehlt.
+				client_authed = True
+			else:
+				print "Auth failed!"
+				break
+
+			data = self.request.recv(1024)
+			self.request.settimeout(2) # recv()-Aufruf blockiert maximal 2 Sekunden.
+
+			while (data and running):
+				#print "Received data from client: %s" % (data)
+				try:
+					data = self.request.recv(1024)
+				except socket.timeout:
+					print "Timeout!"
+					update_output(0, 0)
+
+				# Kommandos vom Client auswerten.
+				if (data == "UP pressed\n"):
+					update_output(vertical = 1)
+				elif (data == "DOWN pressed\n"):
+					update_output(vertical = -1)
+				elif ((data == "UP released\n") or (data == "DOWN released\n")):
+					update_output(vertical = 0)
+				elif (data == "LEFT pressed\n"):
+					update_output(horizontal = -1)
+				elif (data == "RIGHT pressed\n"):
+					update_output(horizontal = 1)
+				elif ((data == "LEFT released\n") or (data == "RIGHT released\n")):
+					update_output(horizontal = 0)
+				elif (data == "Keep alive\n"):
+					pass
+				else:
+					update_output(0, 0)
+
+		print "Connection to client %s closed." % self.client_address[0]
+
+		if client_authed:
+			ClientHandler.cc -= 1
+
+# Routine, um SIGTERM abzufangen.
+def signal_handler(signum, frame):
+	print 'Signal handler called with signal', signum
+	thread.start_new_thread(shutdown_thread, ())
+
+# Das ist, weil die shutdown()-Methode von einem anderen Thread aus gerufen werden muss. Sonst Deadlock.
+def shutdown_thread():
+	global server
+	print "Shuting down server thread called!"
+	server.shutdown()
+	server.server_close()
+
+def update_output(vertical=None, horizontal=None):
+	global l_speed, r_speed
+
+	if (horizontal is not None):
+		l_speed = horizontal
+
+	if (vertical is not None):
+		r_speed = vertical
+
+	print "=== Currend Speed ===\n\tl_speed=%d\n\tr_speed=%d" % (l_speed, r_speed)
+
+### Einsprungspunkt fuer das Programm.
+print "PiRover server started."
+
+# Routine fuer das Signal SIGTERM mitteilen.
+signal.signal(signal.SIGTERM, signal_handler)
+
+# Und waehle diese Routine auch fuer SIGINT, also wenn das Programm ueber CTRL+C abgebrochen wurde.
+signal.signal(signal.SIGINT, signal_handler)
+
+server = SocketServer.ThreadingTCPServer((LISTEN_ADDRESS, LISTEN_PORT), ClientHandler)
+server.serve_forever()
+
+running = False
+
+print "Server stopped!"
