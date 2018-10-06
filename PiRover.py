@@ -22,6 +22,7 @@
 
 LISTEN_ADDRESS = ""
 LISTEN_PORT = 1987
+VIDEO_RECORD_LOCATION = "/home/pi/"
 
 # Zeichenfolge, welche zur Authentifizierung des Clients dient.
 SECRET = "uMieY6ophu[a"
@@ -29,6 +30,7 @@ SECRET = "uMieY6ophu[a"
 ### Programm startet hier.
 import SocketServer
 import time
+import datetime
 import md5
 import signal
 import thread
@@ -101,8 +103,10 @@ class ClientHandler(SocketServer.BaseRequestHandler):
 			# GStreamer-Pipeline starten.
 			udp_video_sink.set_property("host", self.client_address[0])
 			udp_audio_sink.set_property("host", self.client_address[0])
-			video_pipeline.set_state(Gst.State.PLAYING)
-			audio_pipeline.set_state(Gst.State.PLAYING)
+			filesink.set_property("location", VIDEO_RECORD_LOCATION + "PiRover-Record-" + datetime.datetime.now().strftime("%d-%B-%Y-%H%M") + ".mkv")
+			#video_pipeline.set_state(Gst.State.PLAYING)
+			#audio_pipeline.set_state(Gst.State.PLAYING)
+			gst_pipeline.set_state(Gst.State.PLAYING)
 
 			data = self.request.recv(1024)
 			self.request.settimeout(2) # recv()-Aufruf blockiert maximal 2 Sekunden.
@@ -136,8 +140,9 @@ class ClientHandler(SocketServer.BaseRequestHandler):
 					#	update_output(0, 0)
 
 		# GStreamer-Pipeline wieder schliessen.
-		video_pipeline.set_state(Gst.State.NULL)
-		audio_pipeline.set_state(Gst.State.NULL)
+		#video_pipeline.set_state(Gst.State.NULL)
+		#audio_pipeline.set_state(Gst.State.NULL)
+		gst_pipeline.set_state(Gst.State.NULL)
 
 		update_output(0, 0)
 
@@ -238,9 +243,9 @@ signal.signal(signal.SIGINT, signal_handler)
 
 ###### GStreamer-Pipeline fuer Videouebertragung vorbereiten.
 Gst.init(None)
+gst_pipeline = Gst.Pipeline.new("gstpipeline")
 
 # Video-Pipeline
-video_pipeline = Gst.Pipeline.new("videopipeline")
 
 # Wenn True, wird der JPEG-Encoder verwendet.
 if False:
@@ -254,11 +259,11 @@ if False:
 	udp_video_sink = Gst.ElementFactory.make("udpsink")
 	udp_video_sink.set_property("port", 5000)
 
-	video_pipeline.add(v4l2src)
-	video_pipeline.add(filter)
-	video_pipeline.add(jpegenc)
-	video_pipeline.add(rtpjpegpay)
-	video_pipeline.add(udp_video_sink)
+	gst_pipeline.add(v4l2src)
+	gst_pipeline.add(filter)
+	gst_pipeline.add(jpegenc)
+	gst_pipeline.add(rtpjpegpay)
+	gst_pipeline.add(udp_video_sink)
 
 	v4l2src.link(filter)
 	filter.link(jpegenc)
@@ -277,20 +282,23 @@ else:
 	omxh264enc.set_property("control-rate", "variable")
 	h264parse = Gst.ElementFactory.make("h264parse")
 	h264parse.set_property("config-interval", 1)
+	teev = Gst.ElementFactory.make("tee")
+	queuev1 = Gst.ElementFactory.make("queue")
 	rtph264pay = Gst.ElementFactory.make("rtph264pay")
 	udp_video_sink = Gst.ElementFactory.make("udpsink")
 	udp_video_sink.set_property("port", 5000)
 
-	video_pipeline.add(v4l2src, filter, omxh264enc, h264parse, rtph264pay, udp_video_sink)
+	gst_pipeline.add(v4l2src, filter, omxh264enc, h264parse, teev, queuev1, rtph264pay, udp_video_sink)
 
 	v4l2src.link(filter)
 	filter.link(omxh264enc)
 	omxh264enc.link(h264parse)
-	h264parse.link(rtph264pay)
+	h264parse.link(teev)
+	teev.link(queuev1)
+	queuev1.link(rtph264pay)
 	rtph264pay.link(udp_video_sink)
 
 # Audio-Pipeline
-audio_pipeline = Gst.Pipeline.new("audiopipeline")
 
 # gst-launch-1.0 -v alsasrc device=hw:1,0 ! audioconvert ! audioresample ! audio/x-raw, rate=8000 ! vorbisenc ! udpsink host=192.168.2.116 port=5001
 alsasrc = Gst.ElementFactory.make("alsasrc")
@@ -301,19 +309,35 @@ audio_caps = Gst.Caps.from_string("audio/x-raw, rate=8000")
 audio_filter = Gst.ElementFactory.make("capsfilter")
 audio_filter.set_property("caps", audio_caps)
 vorbisenc = Gst.ElementFactory.make("vorbisenc")
-#rtppcmupay = Gst.ElementFactory.make("rtppcmupay")
+teea = Gst.ElementFactory.make("tee")
+queuea1 = Gst.ElementFactory.make("queue")
 udp_audio_sink = Gst.ElementFactory.make("udpsink")
 udp_audio_sink.set_property("port", 5001)
 
-audio_pipeline.add(alsasrc, audioconvert, audioresample, audio_filter, vorbisenc, udp_audio_sink)
+gst_pipeline.add(alsasrc, audioconvert, audioresample, audio_filter, vorbisenc, teea, queuea1, udp_audio_sink)
 
 alsasrc.link(audioconvert)
 audioconvert.link(audioresample)
 audioresample.link(audio_filter)
 audio_filter.link(vorbisenc)
-#mulawenc.link(rtppcmupay)
-#rtppcmupay.link(udp_audio_sink)
-vorbisenc.link(udp_audio_sink)
+vorbisenc.link(teea)
+teea.link(queuea1)
+queuea1.link(udp_audio_sink)
+
+# Aufnahme-Pipeline
+
+queuev2 = Gst.ElementFactory.make("queue")
+queuea2 = Gst.ElementFactory.make("queue")
+muxer = Gst.ElementFactory.make("matroskamux")
+filesink = Gst.ElementFactory.make("filesink")
+
+gst_pipeline.add(queuev2, queuea2, muxer, filesink)
+
+teev.link(queuev2)
+teea.link(queuea2)
+queuev2.link(muxer)
+queuea2.link(muxer)
+muxer.link(filesink)
 
 ##### Ende des GStreamer-Pipeline-Setups
 
