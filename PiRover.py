@@ -4,17 +4,6 @@
 #
 # Autor: Alexander Graeb <mail@hpvag.de>
 #
-# Benoetigte Pakete unter Raspbian (moeglicherweise sind nicht alle diese Pakete notwendig):
-# * python-gi
-# * gstreamer-tools
-# * gstreamer1.0-tools
-# * python-gst-1.0
-# * gstreamer1.0-omx
-# * gstreamer1.0-videosource
-# * gstreamer1.0-plugins-good
-# * gstreamer1.0-plugins-bad
-# * gstreamer1.0-alsa
-#
 # Bugs:
 #  * Alle Client-Verbindungen muessen erste geschlossen werden, damit das Programm vollstaendig terminiert.
 
@@ -104,8 +93,6 @@ class ClientHandler(SocketServer.BaseRequestHandler):
 			udp_video_sink.set_property("host", self.client_address[0])
 			udp_audio_sink.set_property("host", self.client_address[0])
 			filesink.set_property("location", VIDEO_RECORD_LOCATION + "PiRover-Record-" + datetime.datetime.now().strftime("%d-%B-%Y-%H%M") + ".mkv")
-			#video_pipeline.set_state(Gst.State.PLAYING)
-			#audio_pipeline.set_state(Gst.State.PLAYING)
 			gst_pipeline.set_state(Gst.State.PLAYING)
 
 			data = self.request.recv(1024)
@@ -140,8 +127,6 @@ class ClientHandler(SocketServer.BaseRequestHandler):
 					#	update_output(0, 0)
 
 		# GStreamer-Pipeline wieder schliessen.
-		#video_pipeline.set_state(Gst.State.NULL)
-		#audio_pipeline.set_state(Gst.State.NULL)
 		gst_pipeline.set_state(Gst.State.NULL)
 
 		update_output(0, 0)

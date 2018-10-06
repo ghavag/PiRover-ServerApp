@@ -8,3 +8,16 @@ __PiRover.py__ The actual daemon program.
 
 __TestServer.py__ A fake daemon which lets you test the daemon program without a Raspberry Pi.
 
+## Software dependencies
+
+Applies to and tested under Raspbian GNU/Linux 9 (stretch).
+
+* python-gi
+* gstreamer-tools
+* gstreamer1.0-tools
+* python-gst-1.0
+* gstreamer1.0-omx
+* gstreamer1.0-videosource
+* gstreamer1.0-plugins-good
+* gstreamer1.0-plugins-bad
+* gstreamer1.0-alsa
