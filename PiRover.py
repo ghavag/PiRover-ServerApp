@@ -292,7 +292,7 @@ else:
 # Audio-Pipeline
 audio_pipeline = Gst.Pipeline.new("audiopipeline")
 
-# gst-launch-1.0 -v alsasrc device="hw:1,0" ! audioconvert ! audioresample ! audio/x-raw, rate=8000 ! mulawenc ! rtppcmupay ! udpsink host=192.168.2.102 port=5001
+# gst-launch-1.0 -v alsasrc device=hw:1,0 ! audioconvert ! audioresample ! audio/x-raw, rate=8000 ! vorbisenc ! udpsink host=192.168.2.116 port=5001
 alsasrc = Gst.ElementFactory.make("alsasrc")
 alsasrc.set_property("device", "hw:1,0")
 audioconvert = Gst.ElementFactory.make("audioconvert")
@@ -300,19 +300,20 @@ audioresample = Gst.ElementFactory.make("audioresample")
 audio_caps = Gst.Caps.from_string("audio/x-raw, rate=8000")
 audio_filter = Gst.ElementFactory.make("capsfilter")
 audio_filter.set_property("caps", audio_caps)
-mulawenc = Gst.ElementFactory.make("mulawenc")
-rtppcmupay = Gst.ElementFactory.make("rtppcmupay")
+vorbisenc = Gst.ElementFactory.make("vorbisenc")
+#rtppcmupay = Gst.ElementFactory.make("rtppcmupay")
 udp_audio_sink = Gst.ElementFactory.make("udpsink")
 udp_audio_sink.set_property("port", 5001)
 
-audio_pipeline.add(alsasrc, audioconvert, audioresample, audio_filter, mulawenc, rtppcmupay, udp_audio_sink)
+audio_pipeline.add(alsasrc, audioconvert, audioresample, audio_filter, vorbisenc, udp_audio_sink)
 
 alsasrc.link(audioconvert)
 audioconvert.link(audioresample)
 audioresample.link(audio_filter)
-audio_filter.link(mulawenc)
-mulawenc.link(rtppcmupay)
-rtppcmupay.link(udp_audio_sink)
+audio_filter.link(vorbisenc)
+#mulawenc.link(rtppcmupay)
+#rtppcmupay.link(udp_audio_sink)
+vorbisenc.link(udp_audio_sink)
 
 ##### Ende des GStreamer-Pipeline-Setups
 
