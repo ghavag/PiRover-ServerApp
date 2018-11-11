@@ -306,22 +306,40 @@ teea.link(queuea1)
 queuea1.link(udp_audio_sink)
 
 # Aufnahme-Pipeline
+record_bin = Gst.Bin.new("recpipeline")
 
-queuev2 = Gst.ElementFactory.make("queue")
-queuea2 = Gst.ElementFactory.make("queue")
+queuev2 = Gst.ElementFactory.make("queue", "queuev2")
+record_audio_caps = Gst.Caps.from_string("audio/x-vorbis")
+record_audio_filter = Gst.ElementFactory.make("capsfilter")
+record_audio_filter.set_property("caps", record_audio_caps)
+queuea2 = Gst.ElementFactory.make("queue", "queuea2")
 muxer = Gst.ElementFactory.make("matroskamux")
 filesink = Gst.ElementFactory.make("filesink")
 
-gst_pipeline.add(queuev2)
-gst_pipeline.add(queuea2)
-gst_pipeline.add(muxer)
-gst_pipeline.add(filesink)
+record_bin.add(queuev2)
+record_bin.add(record_audio_filter)
+record_bin.add(queuea2)
+record_bin.add(muxer)
+record_bin.add(filesink)
 
-teev.link(queuev2)
-teea.link(queuea2)
 queuev2.link(muxer)
-queuea2.link(muxer)
+queuea2.link(record_audio_filter)
+record_audio_filter.link(muxer)
 muxer.link(filesink)
+
+pad1 = queuev2.get_static_pad("sink")
+ghostpad1 = Gst.GhostPad.new("sink1", pad1)
+record_bin.add_pad(ghostpad1)
+
+pad2 = queuea2.get_static_pad("sink")
+ghostpad2 = Gst.GhostPad.new("sink2", pad2)
+record_bin.add_pad(ghostpad2)
+
+gst_pipeline.add(record_bin)
+##teev.link(queuev2)
+##teea.link(queuea2)
+teev.link(record_bin)
+teea.link(record_bin)
 
 ##### Ende des GStreamer-Pipeline-Setups
 
