@@ -17,7 +17,6 @@ Applies to and tested under Raspbian GNU/Linux 9 (stretch).
 * gstreamer1.0-tools
 * python-gst-1.0
 * gstreamer1.0-omx
-* gstreamer1.0-videosource
 * gstreamer1.0-plugins-good
 * gstreamer1.0-plugins-bad
 * gstreamer1.0-alsa
