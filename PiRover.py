@@ -217,7 +217,7 @@ def update_output(vertical=None, horizontal=None):
 
 def start_gst_record():
 	global gst_pipeline, gst_rec_bin, rec_filesink, teev, teea
-	rec_filesink.set_property("location", VIDEO_RECORD_LOCATION + "PiRover-Record-" + datetime.datetime.now().strftime("%d-%B-%Y-%H%M") + ".mkv")
+	rec_filesink.set_property("location", VIDEO_RECORD_LOCATION + "PiRover-Record-" + datetime.datetime.now().strftime("%d-%B-%Y-%H%M%S") + ".mkv")
 	gst_pipeline.add(gst_rec_bin)
 	teev.link(gst_rec_bin)
 	teea.link(gst_rec_bin)
