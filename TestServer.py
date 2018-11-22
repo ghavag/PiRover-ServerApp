@@ -24,6 +24,7 @@ import thread
 import sys
 import socket
 import gi
+import re
 
 gi.require_version('Gst', '1.0')
 
@@ -58,7 +59,9 @@ class ClientHandler(SocketServer.BaseRequestHandler):
 			# Begruesse Client und sende Salz fuer den Authentifizierungs-Hash mit.
 			authsalt = str(time.time())
 
-			if (data == 'Hello PiRover!\n'):
+			re_matches = re.findall(r"(Hello PiRover!)(?: Flags=([,\w]+))?", data)
+
+			if (re_matches[0][0] == 'Hello PiRover!'):
 				self.request.send("PiRover 1.0 here! %s\n" % (authsalt))
 			else:
 				break
@@ -66,6 +69,11 @@ class ClientHandler(SocketServer.BaseRequestHandler):
 			if (ClientHandler.cc != 0):
 				self.request.send("Client already connected!\n")
 				break
+
+			# Flags auswerten. (Moeglicherweise mehr in der Zukunft.)
+			if (re_matches[0][1] == 'VIDREC'):
+				start_gst_record()
+				print "Video wird aufgenommen!"
 
 			# Warte darauf, dass sich Client authentifiziert.
 			data = self.request.recv(1024)
@@ -85,10 +93,7 @@ class ClientHandler(SocketServer.BaseRequestHandler):
 				break
 
 			# GStreamer-Pipeline starten.
-			udp_video_sink.set_property("host", self.client_address[0])
-			udp_audio_sink.set_property("host", self.client_address[0])
-			filesink.set_property("location", VIDEO_RECORD_LOCATION + "PiRover-Record-" + datetime.datetime.now().strftime("%d-%B-%Y-%H%M") + ".mkv")
-			gst_pipeline.set_state(Gst.State.PLAYING)
+			start_gst_pipeline(self.client_address[0])
 
 			data = self.request.recv(1024)
 			self.request.settimeout(2) # recv()-Aufruf blockiert maximal 2 Sekunden.
@@ -122,7 +127,7 @@ class ClientHandler(SocketServer.BaseRequestHandler):
 					#	update_output(0, 0)
 
 		# GStreamer-Pipeline wieder schliessen.
-		gst_pipeline.set_state(Gst.State.NULL)
+		stop_gst_pipeline()
 
 		update_output(0, 0)
 
@@ -185,6 +190,28 @@ def update_output(vertical=None, horizontal=None):
 
 	#print "=== Currend Speed ===\n\tl_speed=%d\n\tr_speed=%d" % (l_speed, r_speed)
 
+def start_gst_record():
+	global gst_pipeline, gst_rec_bin, rec_filesink, teev, teea
+	rec_filesink.set_property("location", VIDEO_RECORD_LOCATION + "PiRover-Record-" + datetime.datetime.now().strftime("%d-%B-%Y-%H%M%S") + ".mkv")
+	gst_pipeline.add(gst_rec_bin)
+	teev.link(gst_rec_bin)
+	teea.link(gst_rec_bin)
+
+def stop_gst_record():
+	global gst_pipeline, gst_rec_bin
+	if (gst_pipeline.get_by_name("recpipeline") is not None):
+		gst_pipeline.remove(gst_rec_bin)
+
+def start_gst_pipeline(client_addr):
+	global gst_pipeline, udp_video_sink, udp_audio_sink
+	udp_video_sink.set_property("host", client_addr)
+	udp_audio_sink.set_property("host", client_addr)
+	gst_pipeline.set_state(Gst.State.PLAYING)
+
+def stop_gst_pipeline():
+	gst_pipeline.set_state(Gst.State.NULL)
+	stop_gst_record()
+
 ### Einsprungspunkt fuer das Programm.
 print "PiRover server started."
 
@@ -201,74 +228,49 @@ signal.signal(signal.SIGINT, signal_handler)
 Gst.init(None)
 gst_pipeline = Gst.Pipeline.new("gstpipeline")
 
-# Video-Pipeline
+## Video-Pipeline (H264)
 
-# Wenn True, wird der JPEG-Encoder verwendet.
-if False:
-	#v4l2src = Gst.ElementFactory.make("v4l2src", "v4l2-source")
-	v4l2src = Gst.ElementFactory.make("testvideosrc", "testvideosrc")
-	caps = Gst.Caps.from_string("video/x-raw,width=800,height=600,framerate=25/1")
-	#caps = Gst.Caps.from_string("video/x-raw,width=640,height=480")
-	filter = Gst.ElementFactory.make("capsfilter")
-	filter.set_property("caps", caps)
-	jpegenc = Gst.ElementFactory.make("jpegenc")
-	rtpjpegpay = Gst.ElementFactory.make("rtpjpegpay")
-	udp_video_sink = Gst.ElementFactory.make("udpsink")
-	udp_video_sink.set_property("port", 5000)
+# gst-launch-1.0 -v v4l2src ! video/x-raw,width=640,height=480 ! omxh264enc target-bitrate=8000000 control-rate=variable ! \
+# h264parse config-interval=1 ! rtph264pay ! udpsink host=x.x.x.x port=x
 
-	video_pipeline.add(v4l2src)
-	video_pipeline.add(filter)
-	video_pipeline.add(jpegenc)
-	video_pipeline.add(rtpjpegpay)
-	video_pipeline.add(udp_video_sink)
+#v4l2src = Gst.ElementFactory.make("v4l2src", "v4l2-source")
+#caps = Gst.Caps.from_string("video/x-raw,width=640,height=480,framerate=15/1") # video/x-raw,width=960,height=720,framerate=10/1"
 
-	v4l2src.link(filter)
-	filter.link(jpegenc)
-	jpegenc.link(rtpjpegpay)
-	rtpjpegpay.link(udp_video_sink)
-# Dies ist fuer die H264-Pipeline
-else:
-	# gst-launch-1.0 -v v4l2src ! video/x-raw,width=640,height=480 ! omxh264enc target-bitrate=8000000 control-rate=variable ! \
-	# h264parse config-interval=1 ! rtph264pay ! udpsink host=x.x.x.x port=x
+v4l2src = Gst.ElementFactory.make("videotestsrc", "videotestsrc")
+caps = Gst.Caps.from_string("video/x-raw,width=960,height=720,framerate=15/1") # video/x-raw,width=960,height=720,framerate=10/1"
+filter = Gst.ElementFactory.make("capsfilter")
+filter.set_property("caps", caps)
+x264enc = Gst.ElementFactory.make("x264enc")
+x264enc.set_property("tune", "zerolatency")
+x264enc.set_property("byte-stream", "true")
+#x264enc.set_property("target-bitrate", 8000000)
+#x264enc.set_property("control-rate", "variable")
+h264parse = Gst.ElementFactory.make("h264parse")
+h264parse.set_property("config-interval", 1)
+teev = Gst.ElementFactory.make("tee")
+queuev1 = Gst.ElementFactory.make("queue")
+rtph264pay = Gst.ElementFactory.make("rtph264pay")
+udp_video_sink = Gst.ElementFactory.make("udpsink")
+udp_video_sink.set_property("port", 5000)
 
-	#v4l2src = Gst.ElementFactory.make("v4l2src", "v4l2-source")
-	#caps = Gst.Caps.from_string("video/x-raw,width=640,height=480,framerate=15/1") # video/x-raw,width=960,height=720,framerate=10/1"
+gst_pipeline.add(v4l2src)
+gst_pipeline.add(filter)
+gst_pipeline.add(x264enc)
+gst_pipeline.add(h264parse)
+gst_pipeline.add(teev)
+gst_pipeline.add(queuev1)
+gst_pipeline.add(rtph264pay)
+gst_pipeline.add(udp_video_sink)
 
-	v4l2src = Gst.ElementFactory.make("videotestsrc", "videotestsrc")
-	caps = Gst.Caps.from_string("video/x-raw,width=960,height=720,framerate=15/1") # video/x-raw,width=960,height=720,framerate=10/1"
-	filter = Gst.ElementFactory.make("capsfilter")
-	filter.set_property("caps", caps)
-	x264enc = Gst.ElementFactory.make("x264enc")
-	x264enc.set_property("tune", "zerolatency")
-	x264enc.set_property("byte-stream", "true")
-	#x264enc.set_property("target-bitrate", 8000000)
-	#x264enc.set_property("control-rate", "variable")
-	h264parse = Gst.ElementFactory.make("h264parse")
-	h264parse.set_property("config-interval", 1)
-	teev = Gst.ElementFactory.make("tee")
-	queuev1 = Gst.ElementFactory.make("queue")
-	rtph264pay = Gst.ElementFactory.make("rtph264pay")
-	udp_video_sink = Gst.ElementFactory.make("udpsink")
-	udp_video_sink.set_property("port", 5000)
+v4l2src.link(filter)
+filter.link(x264enc)
+x264enc.link(h264parse)
+h264parse.link(teev)
+teev.link(queuev1)
+queuev1.link(rtph264pay)
+rtph264pay.link(udp_video_sink)
 
-	gst_pipeline.add(v4l2src)
-	gst_pipeline.add(filter)
-	gst_pipeline.add(x264enc)
-	gst_pipeline.add(h264parse)
-	gst_pipeline.add(teev)
-	gst_pipeline.add(queuev1)
-	gst_pipeline.add(rtph264pay)
-	gst_pipeline.add(udp_video_sink)
-
-	v4l2src.link(filter)
-	filter.link(x264enc)
-	x264enc.link(h264parse)
-	h264parse.link(teev)
-	teev.link(queuev1)
-	queuev1.link(rtph264pay)
-	rtph264pay.link(udp_video_sink)
-
-# Audio-Pipeline
+## Audio-Pipeline
 
 # gst-launch-1.0 -v alsasrc device=hw:1,0 ! audioconvert ! audioresample ! audio/x-raw, rate=8000 ! vorbisenc ! udpsink host=192.168.2.116 port=5001
 #alsasrc = Gst.ElementFactory.make("alsasrc")
@@ -305,41 +307,35 @@ vorbisenc.link(teea)
 teea.link(queuea1)
 queuea1.link(udp_audio_sink)
 
-# Aufnahme-Pipeline
-record_bin = Gst.Bin.new("recpipeline")
+## Aufnahme-Pipeline
+gst_rec_bin = Gst.Bin.new("recpipeline")
 
-queuev2 = Gst.ElementFactory.make("queue", "queuev2")
-record_audio_caps = Gst.Caps.from_string("audio/x-vorbis")
-record_audio_filter = Gst.ElementFactory.make("capsfilter")
-record_audio_filter.set_property("caps", record_audio_caps)
-queuea2 = Gst.ElementFactory.make("queue", "queuea2")
-muxer = Gst.ElementFactory.make("matroskamux")
-filesink = Gst.ElementFactory.make("filesink")
+rec_queuev = Gst.ElementFactory.make("queue")
+rec_audio_caps = Gst.Caps.from_string("audio/x-vorbis")
+rec_audio_filter = Gst.ElementFactory.make("capsfilter")
+rec_audio_filter.set_property("caps", rec_audio_caps)
+rec_queuea = Gst.ElementFactory.make("queue")
+rec_muxer = Gst.ElementFactory.make("matroskamux")
+rec_filesink = Gst.ElementFactory.make("filesink")
 
-record_bin.add(queuev2)
-record_bin.add(record_audio_filter)
-record_bin.add(queuea2)
-record_bin.add(muxer)
-record_bin.add(filesink)
+gst_rec_bin.add(rec_queuev)
+gst_rec_bin.add(rec_audio_filter)
+gst_rec_bin.add(rec_queuea)
+gst_rec_bin.add(rec_muxer)
+gst_rec_bin.add(rec_filesink)
 
-queuev2.link(muxer)
-queuea2.link(record_audio_filter)
-record_audio_filter.link(muxer)
-muxer.link(filesink)
+rec_queuev.link(rec_muxer)
+rec_queuea.link(rec_audio_filter)
+rec_audio_filter.link(rec_muxer)
+rec_muxer.link(rec_filesink)
 
-pad1 = queuev2.get_static_pad("sink")
-ghostpad1 = Gst.GhostPad.new("sink1", pad1)
-record_bin.add_pad(ghostpad1)
+rec_padv = rec_queuev.get_static_pad("sink")
+rec_ghostpadv = Gst.GhostPad.new("rec video sink", rec_padv)
+gst_rec_bin.add_pad(rec_ghostpadv)
 
-pad2 = queuea2.get_static_pad("sink")
-ghostpad2 = Gst.GhostPad.new("sink2", pad2)
-record_bin.add_pad(ghostpad2)
-
-gst_pipeline.add(record_bin)
-##teev.link(queuev2)
-##teea.link(queuea2)
-teev.link(record_bin)
-teea.link(record_bin)
+rec_pada = rec_queuea.get_static_pad("sink")
+rec_ghostpada = Gst.GhostPad.new("rec audio sink", rec_pada)
+gst_rec_bin.add_pad(rec_ghostpada)
 
 ##### Ende des GStreamer-Pipeline-Setups
 
