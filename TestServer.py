@@ -121,10 +121,11 @@ class ClientHandler(SocketServer.BaseRequestHandler):
 						update_output(horizontal = 1)
 					elif ((command == "LEFT released\n") or (command == "RIGHT released\n")):
 						update_output(horizontal = 0)
-					#elif (command == "Keep alive\n"):
-					#	pass
-					#else:
-					#	update_output(0, 0)
+					elif (command == "VIDREC on\n"):
+						start_gst_record()
+					elif (command == "VIDREC off\n"):
+						stop_gst_record()
+
 
 		# GStreamer-Pipeline wieder schliessen.
 		stop_gst_pipeline()
@@ -192,15 +193,31 @@ def update_output(vertical=None, horizontal=None):
 
 def start_gst_record():
 	global gst_pipeline, gst_rec_bin, rec_filesink, teev, teea
-	rec_filesink.set_property("location", VIDEO_RECORD_LOCATION + "PiRover-Record-" + datetime.datetime.now().strftime("%d-%B-%Y-%H%M%S") + ".mkv")
-	gst_pipeline.add(gst_rec_bin)
-	teev.link(gst_rec_bin)
-	teea.link(gst_rec_bin)
+
+	if (gst_pipeline.get_by_name("recpipeline") is None):
+		if (gst_pipeline.get_state(Gst.CLOCK_TIME_NONE)[1] == Gst.State.PLAYING):
+			gst_pipeline.set_state(Gst.State.PAUSED)
+
+		rec_filesink.set_property("location", VIDEO_RECORD_LOCATION + "PiRover-Record-" + datetime.datetime.now().strftime("%d-%B-%Y-%H%M%S") + ".mkv")
+		gst_pipeline.add(gst_rec_bin)
+		teev.link(gst_rec_bin)
+		teea.link(gst_rec_bin)
+
+		if (gst_pipeline.get_state(Gst.CLOCK_TIME_NONE)[1] == Gst.State.PAUSED):
+			gst_pipeline.set_state(Gst.State.PLAYING)
 
 def stop_gst_record():
 	global gst_pipeline, gst_rec_bin
+
 	if (gst_pipeline.get_by_name("recpipeline") is not None):
+		if (gst_pipeline.get_state(Gst.CLOCK_TIME_NONE)[1] == Gst.State.PLAYING):
+			gst_pipeline.set_state(Gst.State.PAUSED)
+			gst_rec_bin.set_state(Gst.State.NULL)
+
 		gst_pipeline.remove(gst_rec_bin)
+
+		if (gst_pipeline.get_state(Gst.CLOCK_TIME_NONE)[1] == Gst.State.PAUSED):
+			gst_pipeline.set_state(Gst.State.PLAYING)
 
 def start_gst_pipeline(client_addr):
 	global gst_pipeline, udp_video_sink, udp_audio_sink
