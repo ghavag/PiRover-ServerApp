@@ -75,6 +75,11 @@ class ClientHandler(SocketServer.BaseRequestHandler):
 				self.request.send("Client already connected!\n")
 				break
 
+			# Flags auswerten. (Moeglicherweise mehr in der Zukunft.)
+			if (re_matches[0][1] == 'VIDREC'):
+				start_gst_record()
+				print "Video wird aufgenommen!"
+
 			# Warte darauf, dass sich Client authentifiziert.
 			data = self.request.recv(1024)
 
@@ -276,6 +281,8 @@ queuev1 = Gst.ElementFactory.make("queue")
 rtph264pay = Gst.ElementFactory.make("rtph264pay")
 udp_video_sink = Gst.ElementFactory.make("udpsink")
 udp_video_sink.set_property("port", 5000)
+udp_video_sink.set_property("max-lateness", 0)
+#udp_video_sink = Gst.ElementFactory.make("fakesink")
 
 gst_pipeline.add(v4l2src)
 gst_pipeline.add(filter)
@@ -310,6 +317,7 @@ teea = Gst.ElementFactory.make("tee")
 queuea1 = Gst.ElementFactory.make("queue")
 udp_audio_sink = Gst.ElementFactory.make("udpsink")
 udp_audio_sink.set_property("port", 5001)
+udp_audio_sink.set_property("max-lateness", 0)
 
 gst_pipeline.add(alsasrc)
 gst_pipeline.add(audioconvert)
