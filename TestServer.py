@@ -237,6 +237,7 @@ gst_pipeline = Gst.Pipeline.new("gstpipeline")
 #caps = Gst.Caps.from_string("video/x-raw,width=640,height=480,framerate=15/1") # video/x-raw,width=960,height=720,framerate=10/1"
 
 v4l2src = Gst.ElementFactory.make("videotestsrc", "videotestsrc")
+v4l2src.set_property("pattern", 1) # 1 - snow, 18 - moving ball
 caps = Gst.Caps.from_string("video/x-raw,width=960,height=720,framerate=15/1") # video/x-raw,width=960,height=720,framerate=10/1"
 filter = Gst.ElementFactory.make("capsfilter")
 filter.set_property("caps", caps)
