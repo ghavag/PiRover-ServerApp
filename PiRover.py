@@ -17,12 +17,12 @@ VIDEO_RECORD_LOCATION = "/home/pi/"
 SECRET = "uMieY6ophu[a"
 
 ### Programm startet hier.
-import SocketServer
+import socketserver
 import time
 import datetime
-import md5
+import hashlib
 import signal
-import thread
+import _thread as thread
 import sys
 import socket
 import gi
@@ -44,22 +44,22 @@ LEFT_REV = 25
 RIGHT_FOR = 27
 RIGHT_REV = 12
 
-class ClientHandler(SocketServer.BaseRequestHandler):
+class ClientHandler(socketserver.BaseRequestHandler):
 	cc = 0
 
 	def handle(self):
-		print "Client connected from %s." % (self.client_address[0])
+		print("Client connected from %s." % (self.client_address[0]))
 
 		client_authed = False
 
 		while True:
 			# Warte darauf, dass Client das Zauberwort sagt.
-			data = self.request.recv(1024)
+			data = self.request.recv(1024).decode()
 
 			if not data:
 				break
 
-			print "Received data from client: %s" % (data)
+			print("Received data from client: %s" % (data))
 
 			# Begruesse Client und sende Salz fuer den Authentifizierungs-Hash mit.
 			authsalt = str(time.time())
@@ -67,7 +67,7 @@ class ClientHandler(SocketServer.BaseRequestHandler):
 			re_matches = re.findall(r"(Hello PiRover!)(?: Flags=([,\w]+))?", data)
 
 			if (re_matches[0][0] == 'Hello PiRover!'):
-				self.request.send("PiRover 1.0 here! %s\n" % (authsalt))
+				self.request.send(("PiRover 1.0 here! %s\n" % (authsalt)).encode())
 			else:
 				break
 
@@ -78,23 +78,23 @@ class ClientHandler(SocketServer.BaseRequestHandler):
 			# Flags auswerten. (Moeglicherweise mehr in der Zukunft.)
 			if (re_matches[0][1] == 'VIDREC'):
 				start_gst_record()
-				print "Video wird aufgenommen!"
+				print("Video wird aufgenommen!")
 
 			# Warte darauf, dass sich Client authentifiziert.
-			data = self.request.recv(1024)
+			data = self.request.recv(1024).decode()
 
 			if not data:
 				break
 
-			print "Received data from client: %s" % (data)
+			print("Received data from client: %s" % (data))
 
-			if (data == (md5.new(SECRET + authsalt).hexdigest() + "\n")):
-				print "Client auth ok!"
-				self.request.send("OK\n");
+			if (data == (hashlib.md5((SECRET + authsalt).encode()).hexdigest() + "\n")):
+				print("Client auth ok!")
+				self.request.send("OK\n".encode());
 				ClientHandler.cc += 1 # Erst nachdem sich client erfolgreich authentifiziert hat, wird er gezaehlt.
 				client_authed = True
 			else:
-				print "Auth failed!"
+				print("Auth failed!")
 				break
 
 			# GStreamer-Pipeline starten.
@@ -104,11 +104,11 @@ class ClientHandler(SocketServer.BaseRequestHandler):
 			self.request.settimeout(2) # recv()-Aufruf blockiert maximal 2 Sekunden.
 
 			while (data):
-				print "Received data from client: %s" % (data)
+				print("Received data from client: %s" % (data))
 				try:
-					data = self.request.recv(1024)
+					data = self.request.recv(1024).decode()
 				except socket.timeout:
-					print "Timeout!"
+					print("Timeout!")
 					update_output(0, 0)
 
 				# Kommandos vom Client auswerten. (Manchmal mehrere Kommandos in einem einzelnen Datenpaket.)
@@ -136,20 +136,20 @@ class ClientHandler(SocketServer.BaseRequestHandler):
 
 		update_output(0, 0)
 
-		print "Connection to client %s closed." % self.client_address[0]
+		print("Connection to client %s closed." % self.client_address[0])
 
 		if client_authed:
 			ClientHandler.cc -= 1
 
 # Routine, um SIGTERM abzufangen.
 def signal_handler(signum, frame):
-	print 'Signal handler called with signal', signum
+	print('Signal handler called with signal', signum)
 	thread.start_new_thread(shutdown_thread, ())
 
 # Das ist, weil die shutdown()-Methode von einem anderen Thread aus gerufen werden muss. Sonst Deadlock.
 def shutdown_thread():
 	global server
-	print "Shuting down server thread called!"
+	print("Shuting down server thread called!")
 	server.shutdown()
 	server.server_close()
 
@@ -228,9 +228,10 @@ def stop_gst_record():
 		gst_pipeline.remove(gst_rec_bin)
 
 def start_gst_pipeline(client_addr):
-	global gst_pipeline, udp_video_sink, udp_audio_sink
+	global gst_pipeline, udp_video_sink
 	udp_video_sink.set_property("host", client_addr)
-	udp_audio_sink.set_property("host", client_addr)
+	audsink = gst_pipeline.get_by_name("audsink")
+	audsink.set_property("host", client_addr)
 	gst_pipeline.set_state(Gst.State.PLAYING)
 
 def stop_gst_pipeline():
@@ -238,7 +239,7 @@ def stop_gst_pipeline():
 	stop_gst_record()
 
 ### Einsprungspunkt fuer das Programm.
-print "PiRover server started."
+print("PiRover server started.")
 
 ###### GPIO-Setup.
 IO.setmode(IO.BCM) # Benutze GPIO-Nummerierung.
@@ -266,14 +267,18 @@ gst_pipeline = Gst.Pipeline.new("gstpipeline")
 #caps = Gst.Caps.from_string("video/x-raw,width=640,height=480,framerate=15/1") # video/x-raw,width=960,height=720,framerate=10/1"
 
 v4l2src = Gst.ElementFactory.make("v4l2src", "v4l2-source")
-caps = Gst.Caps.from_string("video/x-raw,width=960,height=720,framerate=15/1") # video/x-raw,width=960,height=720,framerate=10/1"
+caps = Gst.Caps.from_string("video/x-raw,width=640,height=480,framerate=15/1") # video/x-raw,width=960,height=720,framerate=10/1"
 filter = Gst.ElementFactory.make("capsfilter")
 filter.set_property("caps", caps)
-x264enc = Gst.ElementFactory.make("omxh264enc")
+vidcvrt = Gst.ElementFactory.make("videoconvert")
+x264enc = Gst.ElementFactory.make("v4l2h264enc") # omxh264enc
 #x264enc.set_property("tune", "zerolatency")
 #x264enc.set_property("byte-stream", "true")
-x264enc.set_property("target-bitrate", 8000000)
-x264enc.set_property("control-rate", "variable")
+#x264enc.set_property("target-bitrate", 8000000)
+#x264enc.set_property("control-rate", "variable")
+caps2 = Gst.Caps.from_string("video/x-h264,level=(string)3")
+filter2 = Gst.ElementFactory.make("capsfilter")
+filter2.set_property("caps", caps2)
 h264parse = Gst.ElementFactory.make("h264parse")
 h264parse.set_property("config-interval", 1)
 teev = Gst.ElementFactory.make("tee")
@@ -286,7 +291,9 @@ udp_video_sink.set_property("max-lateness", 0)
 
 gst_pipeline.add(v4l2src)
 gst_pipeline.add(filter)
+gst_pipeline.add(vidcvrt)
 gst_pipeline.add(x264enc)
+gst_pipeline.add(filter2)
 gst_pipeline.add(h264parse)
 gst_pipeline.add(teev)
 gst_pipeline.add(queuev1)
@@ -294,8 +301,10 @@ gst_pipeline.add(rtph264pay)
 gst_pipeline.add(udp_video_sink)
 
 v4l2src.link(filter)
-filter.link(x264enc)
-x264enc.link(h264parse)
+filter.link(vidcvrt)
+vidcvrt.link(x264enc)
+x264enc.link(filter2)
+filter2.link(h264parse)
 h264parse.link(teev)
 teev.link(queuev1)
 queuev1.link(rtph264pay)
@@ -303,40 +312,8 @@ rtph264pay.link(udp_video_sink)
 
 ## Audio-Pipeline
 
-# gst-launch-1.0 -v alsasrc device=hw:1,0 ! audioconvert ! audioresample ! audio/x-raw, rate=8000 ! vorbisenc ! udpsink host=192.168.2.116 port=5001
-alsasrc = Gst.ElementFactory.make("alsasrc")
-alsasrc.set_property("device", "hw:1,0")
-audioconvert = Gst.ElementFactory.make("audioconvert")
-audioresample = Gst.ElementFactory.make("audioresample")
-audio_caps = Gst.Caps.from_string("audio/x-raw, rate=8000")
-audio_filter = Gst.ElementFactory.make("capsfilter")
-audio_filter.set_property("caps", audio_caps)
-vorbisenc = Gst.ElementFactory.make("vorbisenc")
-#rtppcmupay = Gst.ElementFactory.make("rtppcmupay")
-teea = Gst.ElementFactory.make("tee")
-queuea1 = Gst.ElementFactory.make("queue")
-udp_audio_sink = Gst.ElementFactory.make("udpsink")
-udp_audio_sink.set_property("port", 5001)
-udp_audio_sink.set_property("max-lateness", 0)
-
-gst_pipeline.add(alsasrc)
-gst_pipeline.add(audioconvert)
-gst_pipeline.add(audioresample)
-gst_pipeline.add(audio_filter)
-gst_pipeline.add(vorbisenc)
-gst_pipeline.add(teea)
-gst_pipeline.add(queuea1)
-gst_pipeline.add(udp_audio_sink)
-
-alsasrc.link(audioconvert)
-audioconvert.link(audioresample)
-audioresample.link(audio_filter)
-audio_filter.link(vorbisenc)
-#mulawenc.link(rtppcmupay)
-#rtppcmupay.link(udp_audio_sink)
-vorbisenc.link(teea)
-teea.link(queuea1)
-queuea1.link(udp_audio_sink)
+aud_pipeline = Gst.parse_launch("alsasrc device=hw:1,0 ! lamemp3enc ! udpsink name=audsink port=5001")
+gst_pipeline.add(aud_pipeline)
 
 ## Aufnahme-Pipeline
 gst_rec_bin = Gst.Bin.new("recpipeline")
@@ -370,10 +347,10 @@ gst_rec_bin.add_pad(rec_ghostpada)
 
 ##### Ende des GStreamer-Pipeline-Setups
 
-server = SocketServer.ThreadingTCPServer((LISTEN_ADDRESS, LISTEN_PORT), ClientHandler)
+server = socketserver.ThreadingTCPServer((LISTEN_ADDRESS, LISTEN_PORT), ClientHandler)
 server.serve_forever()
 
 ###### Fuer Techcammod
 IO.cleanup()
 
-print "Server stopped!"
+print("Server stopped!")
